@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyseur Lexical pour C</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
+        
+        body {
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+        
+        .description {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .panels {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .panel {
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        .panel-header {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            font-weight: bold;
+        }
+        
+        textarea, pre {
+            width: 100%;
+            min-height: 300px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        
+        th {
+            background-color: #f8f9fa;
+        }
+        
+        .token-keyword { color: #0000ff; }
+        .token-identifier { color: #000000; }
+        .token-number { color: #008000; }
+        .token-string { color: #a31515; }
+        .token-operator { color: #800000; }
+        .token-delimiter { color: #666666; }
+        .token-comment { color: #008000; font-style: italic; }
+        
+        footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #777;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Analyseur Lexical pour C</h1>
+        
+        <div class="description">
+            <p>Un outil simple pour l'analyse lexicale du langage C dans le cadre d'un cours de compilation.</p>
+        </div>
+        
+        <div>
+            <button id="analyzeBtn">Analyser</button>
+            <button id="clearBtn">Effacer</button>
+            <button id="exampleBtn">Exemple</button>
+        </div>
+        
+        <div class="panels">
+            <div class="panel">
+                <div class="panel-header">Code Source (C)</div>
+                <textarea id="sourceCode" placeholder="Entrez votre code C ici..."></textarea>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-header">Résultats de l'Analyse Lexicale</div>
+                <div id="results" style="overflow-y: auto; max-height: 500px;">
+                    <table id="tokensTable">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Lexème</th>
+                                <th>Type</th>
+                                <th>Ligne</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <div class="panel-header">Code avec Coloration Syntaxique</div>
+            <pre id="highlightedCode"></pre>
+        </div>
+        
+        <footer>
+            <p>© 2025 Analyseur Lexical pour Cours de Compilation</p>
+        </footer>
+    </div>
+
+    <script>
+        // DOM Elements
+        const sourceCode = document.getElementById('sourceCode');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const exampleBtn = document.getElementById('exampleBtn');
+        const resultsTable = document.getElementById('tokensTable').querySelector('tbody');
+        const highlightedCode = document.getElementById('highlightedCode');
+        
+        // C Language Definition
+        const cTokenDefinitions = {
+            // Keywords in C
+            keywords: [
+                'auto', 'break', 'case', 'char', 'const', 'continue', 'default', 'do', 'double',
+                'else', 'enum', 'extern', 'float', 'for', 'goto', 'if', 'int', 'long',
+                'register', 'return', 'short', 'signed', 'sizeof', 'static', 'struct',
+                'switch', 'typedef', 'union', 'unsigned', 'void', 'volatile', 'while'
+            ],
+            
+            // Regular expressions for different token types
+            patterns: [
+                { type: 'comment', regex: /\/\/.*|\/\*[\s\S]*?\*\// },
+                { type: 'string', regex: /"([^"\\]|\\.)*"/ },
+                { type: 'char', regex: /'([^'\\]|\\.)*'/ },
+                { type: 'preprocessor', regex: /#[a-zA-Z]+(\s+[a-zA-Z0-9_"<>.]+)*/ },
+                { type: 'number', regex: /\b[0-9]+(\.[0-9]+)?(e[+-]?[0-9]+)?\b/ },
+                { type: 'identifier', regex: /[a-zA-Z_][a-zA-Z0-9_]*/ },
+                { type: 'operator', regex: /[+\-*/%=&|^~!<>?:]=?|&&|\|\||<<|>>|\+\+|--|\->|\./ },
+                { type: 'delimiter', regex: /[;,(){}\[\]]/ }
+            ]
+        };
+        
+        // Example C code
+        const exampleCode = `#include <stdio.h>
+
+/* Calculate factorial of a number */
+int factorial(int n) {
+    // Base case
+    if (n <= 1) {
+        return 1;
+    } else {
+        return n * factorial(n-1);
+    }
+}
+
+int main() {
+    int num = 5;
+    int result = 0;
+    
+    // Call factorial function
+    result = factorial(num);
+    
+    printf("Factorial of %d is %d\\n", num, result);
+    
+    return 0;
+}`;
+        
+        // Event listeners
+        analyzeBtn.addEventListener('click', analyzeCCode);
+        clearBtn.addEventListener('click', clearAll);
+        exampleBtn.addEventListener('click', loadExample);
+        
+        // Load example code
+        function loadExample() {
+            sourceCode.value = exampleCode;
+        }
+        
+        // Clear all fields
+        function clearAll() {
+            sourceCode.value = '';
+            resultsTable.innerHTML = '';
+            highlightedCode.innerHTML = '';
+        }
+        
+        // Main lexical analysis function
+        function analyzeCCode() {
+            const code = sourceCode.value;
+            const lines = code.split('\n');
+            const tokens = [];
+            
+            // Clear previous results
+            resultsTable.innerHTML = '';
+            
+            // Process each line
+            for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+                const line = lines[lineNum];
+                let pos = 0;
+                
+                // Skip empty lines
+                if (line.trim() === '') continue;
+                
+                while (pos < line.length) {
+                    // Skip whitespace
+                    if (/\s/.test(line[pos])) {
+                        pos++;
+                        continue;
+                    }
+                    
+                    // Try to match tokens
+                    let matched = false;
+                    
+                    // Check for comment first
+                    if (line.substr(pos, 2) === '//') {
+                        // Single line comment
+                        const commentText = line.substr(pos);
+                        tokens.push({
+                            value: commentText,
+                            type: 'comment',
+                            line: lineNum + 1
+                        });
+                        pos = line.length; // Move to end of line
+                        matched = true;
+                    } else if (line.substr(pos, 2) === '/*') {
+                        // Multi-line comment
+                        let commentEnd = -1;
+                        let commentText = line.substr(pos);
+                        
+                        // Look for comment end on same line
+                        const endPos = line.indexOf('*/', pos + 2);
+                        if (endPos !== -1) {
+                            commentText = line.substring(pos, endPos + 2);
+                            pos = endPos + 2;
+                        } else {
+                            // Search in following lines
+                            let i = lineNum + 1;
+                            while (i < lines.length) {
+                                const endPos = lines[i].indexOf('*/');
+                                if (endPos !== -1) {
+                                    commentText += '\n' + lines[i].substring(0, endPos + 2);
+                                    lineNum = i;
+                                    pos = endPos + 2;
+                                    break;
+                                } else {
+                                    commentText += '\n' + lines[i];
+                                    i++;
+                                }
+                                
+                                // If we reach end of file without finding comment end
+                                if (i === lines.length) {
+                                    lineNum = i - 1;
+                                    pos = lines[lineNum].length;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        tokens.push({
+                            value: commentText,
+                            type: 'comment',
+                            line: lineNum + 1
+                        });
+                        matched = true;
+                    }
+                    
+                    // If not matched as comment, try other token types
+                    if (!matched) {
+                        // Check each pattern
+                        for (const pattern of cTokenDefinitions.patterns) {
+                            pattern.regex.lastIndex = 0; // Reset regex (in case it's global)
+                            const match = line.substr(pos).match(new RegExp('^' + pattern.regex.source));
+                                
+                            if (match && match[0]) {
+                                let tokenType = pattern.type;
+                                const tokenValue = match[0];
+                                
+                                // Check if identifier is actually a keyword
+                                if (tokenType === 'identifier' && cTokenDefinitions.keywords.includes(tokenValue)) {
+                                    tokenType = 'keyword';
+                                }
+                                
+                                tokens.push({
+                                    value: tokenValue,
+                                    type: tokenType,
+                                    line: lineNum + 1
+                                });
+                                
+                                pos += tokenValue.length;
+                                matched = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // If nothing matched, skip one character (unknown token)
+                    if (!matched) {
+                        tokens.push({
+                            value: line[pos],
+                            type: 'unknown',
+                            line: lineNum + 1
+                        });
+                        pos++;
+                    }
+                }
+            }
+            
+            // Display tokens in table
+            tokens.forEach((token, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${escapeHTML(token.value)}</td>
+                    <td>${token.type}</td>
+                    <td>${token.line}</td>
+                `;
+                resultsTable.appendChild(row);
+            });
+            
+            // Generate highlighted code
+            generateHighlightedCode(tokens, lines);
+        }
+        
+        // Highlight code using the tokens
+        function generateHighlightedCode(tokens, lines) {
+            let highlightedLines = [];
+            
+            // Initialize with original lines
+            for (let i = 0; i < lines.length; i++) {
+                highlightedLines[i] = escapeHTML(lines[i]);
+            }
+            
+            // Sort tokens by line number and create colored spans
+            tokens.sort((a, b) => {
+                if (a.line !== b.line) return a.line - b.line;
+                return lines[a.line - 1].indexOf(a.value) - lines[b.line - 1].indexOf(b.value);
+            });
+            
+            // Apply coloring (in reverse order to avoid position issues)
+            for (let i = tokens.length - 1; i >= 0; i--) {
+                const token = tokens[i];
+                const lineIndex = token.line - 1;
+                
+                if (lineIndex >= 0 && lineIndex < lines.length) {
+                    const line = lines[lineIndex];
+                    const tokenPos = line.indexOf(token.value);
+                    
+                    if (tokenPos !== -1) {
+                        const before = highlightedLines[lineIndex].substring(0, tokenPos);
+                        const after = highlightedLines[lineIndex].substring(tokenPos + token.value.length);
+                        const coloredToken = `<span class="token-${token.type}">${escapeHTML(token.value)}</span>`;
+                        
+                        highlightedLines[lineIndex] = before + coloredToken + after;
+                    }
+                }
+            }
+            
+            // Join lines and display
+            highlightedCode.innerHTML = highlightedLines.join('\n');
+        }
+        
+        // Helper function to escape HTML special characters
+        function escapeHTML(text) {
+            return text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+        
+        // Load example on page load
+        window.onload = loadExample;
+    </script>
+</body>
+</html>
